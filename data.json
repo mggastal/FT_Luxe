@@ -1,0 +1,20 @@
+{
+  "cliente": "Luxe Consulting",
+  "cor": "#B8860B",
+  "letra": "LX",
+  "lancamentos": [
+    "LUXE4 · Out",
+    "LUXE3 · Set",
+    "Agosto 31",
+    "Agosto"
+  ],
+  "moeda": "EUR",
+  "moeda_simbolo": "€",
+  "atualizado": "21/10/2026",
+  "kpis": {
+    "spend": 1744.3,
+    "leads": 71,
+    "leads_crm": 41,
+    "cpl": 24.57
+  }
+}
