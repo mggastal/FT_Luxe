@@ -68,7 +68,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
   cursor:pointer;transition:all .15s;font-family:inherit;line-height:1.4;}
 .lct-btn:hover{border-color:#059669;color:#059669;}
 .lct-btn.active{background:#059669;border-color:#059669;color:#fff;}
-.crm-aviso{background:#7c3aed12;border:1px solid #7c3aed40;color:var(--text);border-radius:var(--r);padding:8px 12px;font-size:11px;margin:-4px 0 14px;line-height:1.45;}
+.crm-aviso{background:#7c3aed12;border:1px solid #7c3aed40;color:var(--text);border-radius:var(--r);padding:8px 12px;font-size:11px;margin:10px 0 0;line-height:1.45;}
 .crm-aviso b{color:#7c3aed;}
 .lct-grp{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-right:14px;}
 .lct-grp-lbl{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--muted2);}
@@ -444,7 +444,6 @@ details.desk-only{display:block!important;}
         <div style="padding:0 14px 12px;" id="metaCampFilter"></div>
       </details>
       <div class="krow k5 mb14" id="metaKpis"></div>
-      <div id="crmAviso" class="crm-aviso" style="display:none"></div>
       <div class="g73">
         <div class="funnel-card" style="margin-bottom:0"><div class="funnel-title" data-i18n="funil_ttl">Funil de Captação</div><div class="funnel-steps" id="funnelSteps"></div></div>
         <div class="cc" id="tempCard" style="display:flex;flex-direction:column;gap:10px;">
@@ -458,6 +457,7 @@ details.desk-only{display:block!important;}
         <div class="cc-t" data-i18n="chart_leads_ttl">Leads Diários &amp; Investimento</div>
         <div class="cc-s" data-i18n="chart_leads_sub">Leads (barras azuis) · Invest. (linha verde) · CPL (linha preta tracejada)</div>
         <div class="cw" style="height:210px"><canvas id="chMetaMain"></canvas></div>
+        <div id="crmAviso" class="crm-aviso" style="display:none"></div>
       </div>
       <div class="section">
         <div class="sec-hd" data-i18n="campanhas">Campanhas</div>
@@ -729,7 +729,7 @@ const TRANSLATIONS = {
     f_temp:           'Temperatura',
     f_todos:          'Todos',
     f_outros:         'Sem pessoa',
-    crm_aviso:        'ⓘ <b>Leads CRM com data antiga não aparecem nos gráficos nem nas tabelas: {n}.</b> A CRM informa só a data da <b>primeira</b> entrada do lead. Quem já era contato e se inscreveu de novo neste lançamento chega com uma data anterior ao anúncio, e por isso fica de fora.',
+    crm_aviso:        'A CRM informa só a data da primeira entrada do lead. Quem já era contato e se inscreveu de novo neste lançamento chega com uma data anterior ao anúncio, e por isso, não contabiliza nesse gráfico diário.',
     kpi_cpl:          'CPL',
     kpi_cap:          'captados no período',
     kpi_cpl_sub:      'Custo por Lead',
@@ -940,7 +940,7 @@ const TRANSLATIONS = {
     f_temp:           'Temperatura',
     f_todos:          'Todos',
     f_outros:         'Sin persona',
-    crm_aviso:        'ⓘ <b>Leads CRM con fecha antigua no aparecen en los gráficos ni en las tablas: {n}.</b> El CRM solo informa la fecha de la <b>primera</b> entrada del lead. Quien ya era contacto y se inscribió de nuevo en este lanzamiento llega con una fecha anterior al anuncio, por eso queda fuera.',
+    crm_aviso:        'El CRM solo informa la fecha de la primera entrada del lead. Quien ya era contacto y se inscribió de nuevo en este lanzamiento llega con una fecha anterior al anuncio y, por eso, no se contabiliza en este gráfico diario.',
     kpi_cpl:          'CPL',
     kpi_cap:          'captados en el período',
     kpi_cpl_sub:      'Costo por Lead',
@@ -1150,6 +1150,7 @@ function gk(){return filtroAtivo+'|'+filtroPessoa+'|'+filtroTemp;}
 function _nomeTem(c,cod){return new RegExp('(^|[^A-Z])'+cod+'([^A-Z]|$)').test(String(c||'').toUpperCase());}
 function pessoaDe(c){return ((PESSOAS||[]).find(p=>_nomeTem(c,p[0]))||[''])[0];}
 function tempDe(c){return ((TEMPS||[]).find(p=>_nomeTem(c,p[0]))||[''])[0];}
+function periodoTudo(){return periodDays===0&&!dateI&&!dateF;}
 function rowOk(codes,camp){
   if(filtroAtivo!=='all' && !(codes||[]).includes(filtroAtivo)) return false;
   if(filtroPessoa!=='all' && pessoaDe(camp)!==filtroPessoa) return false;
@@ -1377,7 +1378,10 @@ function renderMeta(){
   const ldMK=md?.leads?.reduce((a,b)=>a+(b||0),0)||0;
   const cplMK=spMK>0&&ldMK>0?r2(spMK/ldMK):null;
   const cplCor=cplMK!=null?(cplMK<=CPL_BOM?'#059669':cplMK<=CPL_MEDIO?'#d97706':'#dc2626'):'var(--muted)';
-  const crmMK=md?.leads_crm?.reduce((a,b)=>a+(b||0),0)||0;
+  // CRM com data antiga (1ª entrada do contato) só conta no período Tudo
+  const nAnt=periodoTudo()?(CRM_ANTIGOS||[]).filter(a=>rowOk(a.codes,a.c)&&(!metaCampSel.size||metaCampSel.has(a.c))).reduce((s,a)=>s+a.n,0):0;
+  const nAntTot=(CRM_ANTIGOS||[]).filter(a=>rowOk(a.codes,a.c)&&(!metaCampSel.size||metaCampSel.has(a.c))).reduce((s,a)=>s+a.n,0);
+  const crmMK=(md?.leads_crm?.reduce((a,b)=>a+(b||0),0)||0)+nAnt;
   const cplCrm=spMK>0&&crmMK>0?r2(spMK/crmMK):null;
   const cplCrmCor=cplCrm!=null?(cplCrm<=CPL_BOM?'#059669':cplCrm<=CPL_MEDIO?'#d97706':'#dc2626'):'var(--muted)';
   const pctCrm=ldMK>0?r2(crmMK/ldMK*100):null;
@@ -1388,10 +1392,9 @@ function renderMeta(){
     <div class="kpi" style="--kc:#7c3aed"><div class="kpi-lbl">${t('kpi_crm')}</div><div class="kpi-val" style="color:var(--text)">${fN(crmMK)}</div><div class="kpi-sub">${pctCrm!=null?fP(pctCrm)+' '+t('kpi_crm_pct'):t('kpi_crm_sub')}</div></div>
     <div class="kpi" style="--kc:${cplCrmCor}"><div class="kpi-lbl">${t('kpi_cpl_crm')}</div><div class="kpi-val" style="color:${cplCrmCor}">${cplCrm!=null?fR(cplCrm):'—'}</div><div class="kpi-sub">${t('kpi_cpl_crm_sub')}</div></div>`;
 
-  const nAnt=(CRM_ANTIGOS||[]).filter(a=>rowOk(a.codes,a.c)&&(!metaCampSel.size||metaCampSel.has(a.c))).reduce((s,a)=>s+a.n,0);
   const av=document.getElementById('crmAviso');
-  av.style.display=nAnt?'':'none';
-  av.innerHTML=nAnt?t('crm_aviso').replace('{n}',fN(nAnt)):'';
+  av.style.display=nAntTot?'':'none';
+  av.innerHTML=nAntTot?'ⓘ '+t('crm_aviso'):'';
 
   const funnelKpis={
     impressions: md.impressions?.reduce((a,b)=>a+(b||0),0)||0,
@@ -2751,7 +2754,7 @@ function cpPeriodFilter(){
   });
 }
 function cpNew(n){return {n,sp:0,imp:0,lc:0,pv:0,ld:0,crm:0,camps:new Set(),veic:new Set(),cmb:{},active:false,sub:{},subC:{}};}
-function cpAdd(o,r){o.sp+=r[2];o.imp+=r[3];o.lc+=r[4];o.pv+=r[5];o.ld+=r[6];o.crm+=r[7]||0;}
+function cpAdd(o,r){o.sp+=r[2];o.imp+=r[3];o.lc+=r[4];o.pv+=r[5];o.ld+=r[6];o.crm+=(r[7]||0)+(periodoTudo()?(r[8]||0):0);}
 function cpCalc(o){
   const sp=r2(o.sp);
   return Object.assign(o,{sp,

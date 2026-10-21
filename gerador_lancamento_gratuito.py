@@ -224,23 +224,27 @@ def merge_crm(df, crm):
     """Cola leads_crm na linha do Meta com mesma data+campanha+conjunto+anúncio.
     Lead sem linha correspondente no Meta (UTM diferente, dia sem gasto) vira linha só com leads_crm."""
     keys=["date","campaign","adset","ad"]
-    df=df.copy(); df["leads_crm"]=0
+    df=df.copy(); df["leads_crm"]=0; df["crm_ant"]=0
     if crm is None or crm.empty: return df
     # "Created" é a 1ª entrada do contato, não a inscrição atual: contato antigo que se inscreve
-    # de novo chega com data anterior ao anúncio. Esses ficam fora dos gráficos/tabelas e só
-    # aparecem no aviso (CRM_ANTIGOS, contados por campanha).
+    # de novo chega com data anterior ao anúncio. Esses viram "crm_ant": entram nos totais do
+    # período Tudo (KPIs, tabelas), mas não nas barras diárias nem em períodos filtrados.
     ini=df.groupby(["campaign","adset","ad"])["date"].min().rename("_ini").reset_index()
     crm=crm.merge(ini,on=["campaign","adset","ad"],how="left")
     _ant=crm["_ini"].notna()&(crm["date"]<crm["_ini"])
     CRM_ANTIGOS.clear()
     if _ant.any():
-        print(f"     {int(crm.loc[_ant,'leads_crm'].sum())} lead(s) CRM com data anterior ao anúncio → só no aviso")
+        print(f"     {int(crm.loc[_ant,'leads_crm'].sum())} lead(s) CRM com data anterior ao anúncio → totais (Tudo), fora do gráfico diário")
         for camp,n in crm[_ant].groupby("campaign")["leads_crm"].sum().items():
             CRM_ANTIGOS.append({"c":camp,"codes":matched_codes(camp),"n":int(n)})
-    crm=crm[~_ant].drop(columns="_ini")
+    crm["crm_ant"]=0
+    crm.loc[_ant,"crm_ant"]=crm.loc[_ant,"leads_crm"]; crm.loc[_ant,"leads_crm"]=0
+    crm.loc[_ant,"date"]=crm.loc[_ant,"_ini"]   # só p/ casar com a linha do anúncio
+    crm=crm.drop(columns="_ini").groupby(keys,as_index=False)[["leads_crm","crm_ant"]].sum()
     first=~df.duplicated(keys)
     idx=df[first].reset_index().merge(crm,on=keys,how="inner",suffixes=("","_c"))
     df.loc[idx["index"],"leads_crm"]=idx["leads_crm_c"].values
+    df.loc[idx["index"],"crm_ant"]=idx["crm_ant_c"].values
     _k=lambda d: d["date"].dt.strftime("%Y-%m-%d")+"|"+d["campaign"]+"|"+d["adset"]+"|"+d["ad"]
     orfaos=crm[~_k(crm).isin(set(_k(df)))].copy()
     if len(orfaos):
@@ -249,12 +253,13 @@ def merge_crm(df, crm):
         for c in ["spend","impressions","link_clicks","page_view","leads_pixel","leads_native","checkout","purchases","purchase_value","leads"]:
             if c in df.columns: df[c]=df[c].fillna(0)
     df["leads_crm"]=df["leads_crm"].fillna(0).astype(int)
+    df["crm_ant"]=df["crm_ant"].fillna(0).astype(int)
     return df
 
 def calc_kpis(p):
     sp=float(p["spend"].sum()); imp=float(p["impressions"].sum())
     lc=float(p["link_clicks"].sum()); pv=float(p["page_view"].sum())
-    ld=float(p["leads"].sum()); lcrm=float(p["leads_crm"].sum())
+    ld=float(p["leads"].sum()); lcrm=float(p["leads_crm"].sum()+p["crm_ant"].sum())
     ck=float(p["checkout"].sum()) if "checkout" in p.columns else 0.0
     pu=float(p["purchases"].sum()) if "purchases" in p.columns else 0.0
     pval=float(p["purchase_value"].sum()) if "purchase_value" in p.columns else 0.0
@@ -274,7 +279,7 @@ def calc_kpis(p):
     }
 
 def _t_kpi(sub):
-    sp = float(sub["spend"].sum()); ld = float(sub["leads"].sum()); lc = float(sub["leads_crm"].sum())
+    sp = float(sub["spend"].sum()); ld = float(sub["leads"].sum()); lc = float(sub["leads_crm"].sum()+sub["crm_ant"].sum())
     return {"spend": round(sp,2), "leads": int(ld), "cpl": round(sp/ld,2) if ld>0 else None,
             "leads_crm": int(lc), "cpl_crm": round(sp/lc,2) if lc>0 else None}
 
@@ -380,7 +385,7 @@ def build_cripub(df, img_dir):
     O front agrega por nome do criativo / nome do conjunto respeitando
     lançamento, período e datas.
       combos: [camp_idx, adset_idx, ad_idx, thumb, status]
-      rows:   [day_idx, combo_idx, spend, imp, link_clicks, page_view, leads, leads_crm]"""
+      rows:   [day_idx, combo_idx, spend, imp, link_clicks, page_view, leads, leads_crm, (crm_antigos)]"""
     camps=sorted(df["campaign"].astype(str).unique().tolist())
     adsets=sorted(df["adset"].astype(str).unique().tolist())
     ads=sorted(df["ad"].astype(str).unique().tolist())
@@ -393,7 +398,7 @@ def build_cripub(df, img_dir):
             if k not in thumb_url: thumb_url[k]=str(r["thumb"])
     agg=df.groupby(["date","campaign","adset","ad"]).agg(
         spend=("spend","sum"),impressions=("impressions","sum"),link_clicks=("link_clicks","sum"),
-        page_view=("page_view","sum"),leads=("leads","sum"),leads_crm=("leads_crm","sum")).reset_index()
+        page_view=("page_view","sum"),leads=("leads","sum"),leads_crm=("leads_crm","sum"),crm_ant=("crm_ant","sum")).reset_index()
     combos=[]; combo_idx={}; days=[]; day_idx={}; rows=[]
     for _,r in agg.sort_values("date").iterrows():
         k=(str(r["campaign"]),str(r["adset"]),str(r["ad"]))
@@ -404,9 +409,9 @@ def build_cripub(df, img_dir):
         d=r["date"].strftime("%d/%m/%y")
         if d not in day_idx: day_idx[d]=len(days); days.append(d)
         sp=round(float(r["spend"]),2); imp=int(r["impressions"]); lc=int(r["link_clicks"])
-        pv=int(r["page_view"]); ld=int(r["leads"]); crm=int(r["leads_crm"])
-        if sp==0 and imp==0 and ld==0 and crm==0: continue
-        rows.append([day_idx[d],combo_idx[k],sp,imp,lc,pv,ld,crm])
+        pv=int(r["page_view"]); ld=int(r["leads"]); crm=int(r["leads_crm"]); ant=int(r["crm_ant"])
+        if sp==0 and imp==0 and ld==0 and crm==0 and ant==0: continue
+        rows.append([day_idx[d],combo_idx[k],sp,imp,lc,pv,ld,crm]+([ant] if ant else []))
     return {"camps":camps,"camp_codes":[matched_codes(c) for c in camps],
             "adsets":adsets,"ads":ads,"days":days,"combos":combos,"rows":rows}
 
@@ -437,7 +442,8 @@ def build_status_maps(df):
                 ad_status[(str(camp),str(adset),str(ad))]=_pick_status(g3)
     return camp_status, adset_status, ad_status
 
-def meta_tables_period(df, p, img_dir, camp_status=None, adset_status=None, ad_status=None):
+def meta_tables_period(df, p, img_dir, camp_status=None, adset_status=None, ad_status=None, com_ant=False):
+    if com_ant: p=p.assign(leads_crm=p["leads_crm"]+p["crm_ant"])
     camp_status=camp_status or {}; adset_status=adset_status or {}; ad_status=ad_status or {}
     def ag(sub,cols): return sub.groupby(cols).agg(spend=("spend","sum"),impressions=("impressions","sum"),link_clicks=("link_clicks","sum"),page_view=("page_view","sum"),leads=("leads","sum"),leads_crm=("leads_crm","sum"),checkout=("checkout","sum"),purchases=("purchases","sum"),purchase_value=("purchase_value","sum")).reset_index()
 
@@ -506,7 +512,7 @@ def meta_tables(df, img_dir):
         result[g]={}
         for pname,n in [("1",1),("7",7),("14",14),("30",30),("all",0)]:
             p=subset[subset["date"]>=hoje-pd.Timedelta(days=n-1)] if n>0 else subset
-            result[g][pname]=meta_tables_period(df,p,img_dir,camp_status,adset_status,ad_status)
+            result[g][pname]=meta_tables_period(df,p,img_dir,camp_status,adset_status,ad_status,com_ant=(n==0))
         print(f"     [{g}]: {len(result[g]['all']['camps'])} camps | {len(result[g]['all']['ads'])} ads")
     return result
 
