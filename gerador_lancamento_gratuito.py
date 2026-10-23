@@ -202,6 +202,10 @@ def load_meta():
 
 # ══ CRM ═══════════════════════════════════════════════
 SEM_UTM = "(sem UTM)"
+# Lead sem UTM: lançamento e pessoa vêm das tags da CRM (1ª tag encontrada vale; lançamento mais novo primeiro).
+# O valor precisa conter o termo de busca do lançamento em LANCAMENTO_CODS.
+CRM_TAG_LANCAMENTO = [("lead 28 octubre", "LUXE4-OUT26")]
+CRM_TAG_PESSOA     = [("lead marcel", "MARCEL"), ("lead sonia", "SONIA")]
 CRM_ANTIGOS = []   # [{c: campanha, codes, n}] leads CRM com data anterior ao anúncio
 def load_crm():
     """Aba crm: 1 linha por contato. Só contagens vão para o HTML (nada de nome/e-mail/telefone)."""
@@ -213,11 +217,18 @@ def load_crm():
     # data local do lead (o Created já vem no fuso de Madri: 2026-10-20T23:54:17+02:00)
     cr["date"]=pd.to_datetime(cr["Created"].astype(str).str[:10],errors="coerce")
     cr=cr.dropna(subset=["date"])
-    cr["campaign"]=cr["UTM Campaign"].fillna("").astype(str).str.strip().replace("",SEM_UTM)
+    cr["campaign"]=cr["UTM Campaign"].fillna("").astype(str).str.strip()
+    def _sem_utm_nome(tags):
+        tags=[t.strip().lower() for t in str(tags).split(",")]
+        lct=next((v for k,v in CRM_TAG_LANCAMENTO if k in tags),"")
+        pe=next((v for k,v in CRM_TAG_PESSOA if k in tags),"")
+        return " · ".join(x for x in ["SEM UTM",lct,pe] if x) if (lct or pe) else SEM_UTM
+    _vazio=cr["campaign"]==""
+    cr.loc[_vazio,"campaign"]=cr.loc[_vazio,"Tags"].apply(_sem_utm_nome)
     cr["adset"]=cr["UTM Medium"].fillna("").astype(str).str.strip()
     cr["ad"]=cr["UTM Content"].fillna("").astype(str).str.strip()
     agg=cr.groupby(["date","campaign","adset","ad"]).size().reset_index(name="leads_crm")
-    print(f"     {int(agg['leads_crm'].sum())} leads CRM | {(cr['campaign']==SEM_UTM).sum()} sem UTM")
+    print(f"     {int(agg['leads_crm'].sum())} leads CRM | {int(_vazio.sum())} sem UTM (lançamento/pessoa pelas tags)")
     return agg
 
 def merge_crm(df, crm):
