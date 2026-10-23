@@ -1297,7 +1297,7 @@ function buildTemp(temp,pessoa){
   });
   // ── Tabelinha ──
   function row(lbl,d,col){
-    if(!d||d.spend===0) return '';
+    if(!d||(d.spend===0&&!d.leads_crm)) return '';
     const cplCls2=d.cpl==null?'':d.cpl<=CPL_BOM?'cg':d.cpl<=CPL_MEDIO?'cw2':'cr';
     const td=(v,cls='')=>`<td style="text-align:right;font-family:'DM Mono',monospace;font-size:11px;padding:5px 0 5px 8px" class="${cls}">${v}</td>`;
     return `<tr>
@@ -1409,7 +1409,8 @@ function renderMeta(){
   funnelKpis.tx_conv=pv2>0?r2(ld2/pv2*100):null;
   funnelKpis.cpl=ld2>0?r2(spMK/ld2):null;
   setTimeout(()=>buildFunnel(funnelKpis),30);
-  setTimeout(()=>buildTemp(getMK()?.temp,getMK()?.pessoa),30);
+  const _tp=calcTempPessoaFromRaw();
+  setTimeout(()=>buildTemp(_tp?.temp||getMK()?.temp,_tp?.pessoa||getMK()?.pessoa),30);
 
   dc('chMetaMain');
   CH['chMetaMain']=new Chart(document.getElementById('chMetaMain'),{
@@ -1442,6 +1443,39 @@ function getPeriodKey(){
   if(periodDays===14) return '14';
   if(periodDays===30) return '30';
   return 'all';
+}
+
+// Temperatura × Pessoa respeitando período, datas, filtros e campanhas marcadas
+function calcTempPessoaFromRaw(){
+  if(!META_RAW_CAMP?.length) return null;
+  const hoje=getHoje();
+  const fim=new Date(hoje); if(periodDays===1) fim.setDate(fim.getDate()-1); fim.setHours(23,59,59,999);
+  const ini=new Date(fim); ini.setDate(ini.getDate()-(periodDays===1?0:periodDays-1)); ini.setHours(0,0,0,0);
+  const nv=()=>({spend:0,leads:0,leads_crm:0});
+  const temp={quente:nv(),frio:nv()}, pessoa={outros:nv()};
+  (PESSOAS||[]).forEach(([c])=>pessoa[c]=nv());
+  const add=(c,sp,ld,crm)=>{
+    const tk={HOT:'quente',COLD:'frio'}[tempDe(c)];
+    if(tk){temp[tk].spend+=sp;temp[tk].leads+=ld;temp[tk].leads_crm+=crm;}
+    const o=pessoa[pessoaDe(c)||'outros']; o.spend+=sp; o.leads+=ld; o.leads_crm+=crm;
+  };
+  META_RAW_CAMP.forEach(r=>{
+    if(!rowOk(r.codes,r.c)) return;
+    if(metaCampSel?.size>0 && !metaCampSel.has(r.c)) return;
+    const dt=parseDayStr(r.d);
+    if(periodDays>0 && (dt<ini||dt>fim)) return;
+    if(dateI&&dt<dateI) return;
+    if(dateF&&dt>dateF) return;
+    add(r.c,r.sp||0,r.ld||0,r.crm||0);
+  });
+  // CRM com data antiga só entra no período Tudo (mesma regra dos KPIs)
+  if(periodoTudo()) (CRM_ANTIGOS||[]).forEach(a=>{
+    if(rowOk(a.codes,a.c)&&(!metaCampSel?.size||metaCampSel.has(a.c))) add(a.c,0,0,a.n);
+  });
+  [...Object.values(temp),...Object.values(pessoa)].forEach(o=>{
+    o.spend=r2(o.spend); o.cpl=o.leads>0?r2(o.spend/o.leads):null; o.cpl_crm=o.leads_crm>0?r2(o.spend/o.leads_crm):null;
+  });
+  return {temp,pessoa};
 }
 
 function calcTableFromRaw(){
